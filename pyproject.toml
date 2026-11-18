@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "veille"
+version = "1.0.0"
+description = "Agent IA local de veille Cybersécurité & Tech propulsé par Ollama"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+    { name = "Kerian" }
+]
+dependencies = [
+    "rich>=13.0.0",
+    "feedparser>=6.0.0",
+    "typer>=0.9.0",
+]
+
+[project.scripts]
+veille = "veille.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

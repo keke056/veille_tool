@@ -1,0 +1,79 @@
+{
+  "ollama": {
+    "base_url": "http://localhost:11434",
+    "api_url": "http://localhost:11434/api/generate",
+    "model": "llama3.2:1b",
+    "fallback_models": [
+      "qwen2.5:1.5b",
+      "qwen2.5:0.5b"
+    ],
+    "timeout_seconds": 90,
+    "temperature": 0.2,
+    "num_ctx": 2048,
+    "num_predict_article": 140,
+    "num_predict_briefing": 450,
+    "num_predict_detail": 600
+  },
+  "scraping": {
+    "hours_window": 24,
+    "max_articles_per_feed": 3,
+    "max_total_articles": 24,
+    "request_timeout_seconds": 12,
+    "user_agent": "Mozilla/5.0 (X11; Linux x86_64) Veille-CyberTech-Agent/1.0"
+  },
+  "storage": {
+    "db_path": "data/veille.db",
+    "retention_days": 14
+  },
+  "feeds": {
+    "Cyber": [
+      {
+        "name": "CERT-FR",
+        "url": "https://www.cert.ssi.gouv.fr/feed/",
+        "enabled": true
+      },
+      {
+        "name": "BleepingComputer",
+        "url": "https://www.bleepingcomputer.com/feed/",
+        "enabled": true
+      },
+      {
+        "name": "The Hacker News",
+        "url": "https://feeds.feedburner.com/TheHackersNews",
+        "enabled": true
+      },
+      {
+        "name": "Krebs on Security",
+        "url": "https://krebsonsecurity.com/feed/",
+        "enabled": true
+      },
+      {
+        "name": "ZATAZ",
+        "url": "https://www.zataz.com/feed/",
+        "enabled": true
+      }
+    ],
+    "Tech": [
+      {
+        "name": "Ars Technica",
+        "url": "https://feeds.arstechnica.com/arstechnica/index",
+        "enabled": true
+      },
+      {
+        "name": "Hacker News (RSS)",
+        "url": "https://hnrss.org/frontpage",
+        "enabled": true
+      },
+      {
+        "name": "Korben",
+        "url": "https://korben.info/feed",
+        "enabled": true
+      },
+      {
+        "name": "Next.ink",
+        "url": "https://next.ink/feed/",
+        "enabled": true
+      }
+    ]
+  }
+}
