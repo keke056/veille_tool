@@ -15,10 +15,19 @@ from rich.rule import Rule
 from rich.table import Table
 
 from veille import __version__
+from veille.autostart import get_os_service_help, setup_autostart
 from veille.config import get_config_path, get_db_path, load_config
 from veille.db import get_latest_briefing, get_today_articles, search_articles
 from veille.ollama_client import ensure_ollama_ready, generate_topic_analysis
 from veille.worker import ensure_articles_translated, run_update_worker
+
+# Garantit l'encodage UTF-8 sur les terminaux Windows (PowerShell / CMD)
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
 
 console = Console()
 
@@ -403,10 +412,8 @@ veille -u
 - **Sources Cybersécurité actives :** {cyber_sources}
 - **Sources Tech actives :** {tech_sources}
 
-## SERVICE D'ARRIÈRE-PLAN (SYSTEMD)
-L'agent `veille` s'exécute automatiquement au démarrage de la session et toutes les **4 heures** via `systemd --user` :
-- Vérifier le timer : `systemctl --user status veille.timer`
-- Voir les logs du worker : `journalctl --user -u veille.service -n 50`
+## SERVICE D'ARRIÈRE-PLAN (MULTI-OS : LINUX / MACOS / WINDOWS)
+{get_os_service_help()}
 """
     console.print(
         Panel(
@@ -461,10 +468,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force une mise à jour manuelle immédiate des flux RSS, résumés IA et traductions FR.",
     )
     parser.add_argument(
+        "--install-service",
+        action="store_true",
+        help="Configure automatiquement le service d'arrière-plan (systemd sur Linux, launchd sur macOS, Task Scheduler sur Windows).",
+    )
+    parser.add_argument(
         "-q",
         "--quiet",
         action="store_true",
-        help="Mode silencieux (utilisé par le service systemd en arrière-plan).",
+        help="Mode silencieux (utilisé par le service en arrière-plan).",
     )
     parser.add_argument(
         "-v",
@@ -489,6 +501,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.subcommand and args.subcommand.lower() in ("man", "manual", "help"):
         render_manual()
         return 0
+
+    if args.install_service:
+        ok, msg = setup_autostart()
+        style = "bold green" if ok else "bold yellow"
+        console.print(f"[{style}]{msg}[/{style}]")
+        return 0 if ok else 1
 
     if args.detail == "__ALL__" and args.subcommand:
         args.detail = args.subcommand

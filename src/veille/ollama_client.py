@@ -6,6 +6,7 @@ import concurrent.futures
 import html
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -13,6 +14,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 from rich.console import Console
@@ -57,26 +59,73 @@ def is_already_french(source: str, text: str) -> bool:
 
 
 def find_ollama_binary() -> str | None:
-    """Recherche l'exécutable ollama dans le PATH ou ~/.local/bin."""
+    """Recherche l'exécutable ollama dans le PATH ou les emplacements standards (Linux, macOS, Windows)."""
     found = shutil.which("ollama")
     if found:
         return found
-    local_candidate = os.path.expanduser("~/.local/bin/ollama")
-    if os.path.isfile(local_candidate) and os.access(local_candidate, os.X_OK):
-        return local_candidate
+
+    current_os = platform.system()
+    candidates: list[Path] = []
+    if current_os == "Windows":
+        local_appdata = os.environ.get("LOCALAPPDATA", "")
+        if local_appdata:
+            candidates.append(Path(local_appdata) / "Programs" / "Ollama" / "ollama.exe")
+        candidates.extend(
+            [
+                Path.home() / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe",
+                Path(os.environ.get("PROGRAMFILES", "C:\\Program Files")) / "Ollama" / "ollama.exe",
+            ]
+        )
+    elif current_os == "Darwin":
+        candidates.extend(
+            [
+                Path("/opt/homebrew/bin/ollama"),
+                Path("/usr/local/bin/ollama"),
+                Path("/Applications/Ollama.app/Contents/Resources/ollama"),
+                Path.home() / ".local" / "bin" / "ollama",
+            ]
+        )
+    else:
+        candidates.extend(
+            [
+                Path.home() / ".local" / "bin" / "ollama",
+                Path("/usr/local/bin/ollama"),
+                Path("/usr/bin/ollama"),
+            ]
+        )
+
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
     return None
 
 
 def print_ollama_install_instructions() -> None:
-    """Affiche des instructions claires si Ollama n'est pas installé."""
+    """Affiche des instructions claires adaptées à l'OS (Linux, macOS, Windows) si Ollama n'est pas installé."""
+    current_os = platform.system()
+    if current_os == "Windows":
+        os_section = (
+            "[bold cyan]Installation rapide sous Windows (PowerShell / CMD) :[/bold cyan]\n"
+            "  [green]winget install Ollama.Ollama[/green]\n"
+            "  [dim]Ou téléchargez l'installateur sur : https://ollama.com/download/windows[/dim]\n\n"
+        )
+    elif current_os == "Darwin":
+        os_section = (
+            "[bold cyan]Installation rapide sous macOS :[/bold cyan]\n"
+            "  [green]brew install --cask ollama[/green]\n"
+            "  [dim]Ou téléchargez l'application sur : https://ollama.com/download/mac[/dim]\n\n"
+        )
+    else:
+        os_section = (
+            "[bold cyan]Installation rapide sous Linux :[/bold cyan]\n"
+            "  [green]curl -fsSL https://ollama.com/install.sh | sh[/green]\n\n"
+        )
+
     instructions = (
-        "[bold red]Ollama n'est pas détecté sur votre système.[/bold red]\n\n"
-        "[bold cyan]Installation rapide sous Linux :[/bold cyan]\n"
-        "  [green]curl -fsSL https://ollama.com/install.sh | sh[/green]\n\n"
-        "[bold cyan]Ou en mode utilisateur (sans root, dans ~/.local/bin) :[/bold cyan]\n"
-        "  [green]mkdir -p ~/.local/bin && curl -sL https://github.com/ollama/ollama/releases/download/v0.5.7/ollama-linux-amd64.tgz | tar -zxf - -C ~/.local ./bin/ollama[/green]\n\n"
+        f"[bold red]Ollama n'est pas détecté sur votre système ({current_os}).[/bold red]\n\n"
+        f"{os_section}"
         "[bold cyan]Puis démarrez le serveur et téléchargez le modèle léger :[/bold cyan]\n"
-        "  [green]ollama serve &[/green]\n"
+        "  [green]ollama serve[/green]\n"
         "  [green]ollama pull llama3.2:1b[/green]"
     )
     console.print(
@@ -99,27 +148,52 @@ def is_ollama_running(base_url: str = "http://localhost:11434") -> bool:
 
 
 def start_ollama_server(ollama_bin: str, base_url: str = "http://localhost:11434") -> bool:
-    """Tente de démarrer le serveur Ollama en arrière-plan s'il n'est pas actif."""
-    try:
-        subprocess.run(
-            ["systemctl", "--user", "start", "ollama.service"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        )
-        if is_ollama_running(base_url):
-            return True
-    except Exception:
-        pass
+    """Tente de démarrer le serveur Ollama en arrière-plan (Linux, macOS, Windows)."""
+    current_os = platform.system()
+
+    if current_os == "Linux":
+        try:
+            subprocess.run(
+                ["systemctl", "--user", "start", "ollama.service"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            if is_ollama_running(base_url):
+                return True
+        except Exception:
+            pass
+    elif current_os == "Darwin" and Path("/Applications/Ollama.app").exists():
+        try:
+            subprocess.run(
+                ["open", "-a", "Ollama", "--args", "hidden"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            for _ in range(6):
+                time.sleep(0.5)
+                if is_ollama_running(base_url):
+                    return True
+        except Exception:
+            pass
 
     try:
-        subprocess.Popen(
-            [ollama_bin, "serve"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        popen_kwargs: dict[str, Any] = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+        }
+        if current_os == "Windows":
+            popen_kwargs["creationflags"] = (
+                getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+                | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+            )
+        else:
+            popen_kwargs["start_new_session"] = True
+
+        subprocess.Popen([ollama_bin, "serve"], **popen_kwargs)
         for _ in range(10):
             time.sleep(0.5)
             if is_ollama_running(base_url):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from veille.autostart import get_os_service_help, get_python_executable
 from veille.cli import build_parser
 from veille.config import get_config_path, load_config
 from veille.db import (
@@ -67,6 +68,9 @@ def test_cli_fr_option_parsing() -> None:
     args_topic_fr = parser.parse_args(["-d", "NGINX", "-fr"])
     assert args_topic_fr.french is True
     assert args_topic_fr.detail == "NGINX"
+    assert parser.parse_args(["--install-service"]).install_service is True
+    assert "--install-service" in get_os_service_help()
+    assert Path(get_python_executable()).exists()
 
 
 def test_sqlite_cache_and_fr_translation(tmp_path: Path) -> None:
