@@ -10,6 +10,7 @@ from veille.config import get_config_path, load_config
 from veille.db import (
     get_cached_article,
     get_today_articles,
+    get_top_articles,
     init_db,
     normalize_title,
     normalize_url,
@@ -68,6 +69,9 @@ def test_cli_fr_option_parsing() -> None:
     args_topic_fr = parser.parse_args(["-d", "NGINX", "-fr"])
     assert args_topic_fr.french is True
     assert args_topic_fr.detail == "NGINX"
+    assert parser.parse_args(["-t"]).top is True
+    assert parser.parse_args(["-t", "-fr"]).top is True
+    assert parser.parse_args(["-t", "-fr"]).french is True
     assert parser.parse_args(["--install-service"]).install_service is True
     assert "--install-service" in get_os_service_help()
     assert Path(get_python_executable()).exists()
@@ -102,6 +106,11 @@ def test_sqlite_cache_and_fr_translation(tmp_path: Path) -> None:
     today = get_today_articles(db_file)
     assert len(today) == 1
     assert "vieille de 10 ans" in today[0]["title_fr"]
+
+    top_items = get_top_articles(today, limit=5)
+    assert len(top_items) == 1
+    assert top_items[0]["top_rank"] == 1
+    assert "CVE-2026-123007" in top_items[0]["relevance_reason"]
 
     # Recherche avec un mot-clé français présent uniquement dans la traduction
     results = search_articles(db_file, "vieille")

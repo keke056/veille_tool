@@ -17,7 +17,12 @@ from rich.table import Table
 from veille import __version__
 from veille.autostart import get_os_service_help, setup_autostart
 from veille.config import get_config_path, get_db_path, load_config
-from veille.db import get_latest_briefing, get_today_articles, search_articles
+from veille.db import (
+    get_latest_briefing,
+    get_today_articles,
+    get_top_articles,
+    search_articles,
+)
 from veille.ollama_client import ensure_ollama_ready, generate_topic_analysis
 from veille.worker import ensure_articles_translated, run_update_worker
 
@@ -137,12 +142,79 @@ def render_synthetic_briefing(
     console.print()
     console.print(
         Panel(
+            "[bold cyan]veille -t[/bold cyan] : Top 5  │  "
             "[bold cyan]veille -fr[/bold cyan] : Traduction FR  │  "
             "[bold cyan]veille -s[/bold cyan] : Sources & URLs  │  "
             "[bold cyan]veille -d[/bold cyan] : Détails  │  "
             "[bold cyan]veille -d \"sujet\"[/bold cyan] : Analyse IA  │  "
-            "[bold cyan]veille -u[/bold cyan] : Rafraîchir  │  "
-            "[bold cyan]veille man[/bold cyan] : Manuel",
+            "[bold cyan]veille -u[/bold cyan] : Rafraîchir",
+            border_style="dim",
+            box=box.ROUNDED,
+        )
+    )
+
+
+def render_top_articles(
+    config: dict[str, Any],
+    db_path: Path,
+    lang_fr: bool = False,
+    limit: int = 5,
+) -> None:
+    """Commande `veille -t` (et `veille -t -fr`) : Affiche uniquement les 5 infos les plus pertinentes à savoir."""
+    articles = ensure_cache_populated(config, db_path, lang_fr=lang_fr)
+    top_list = get_top_articles(articles, limit=limit)
+    lang_badge = "  │  [bold bright_cyan]🇫🇷 TRADUCTION FRANÇAISE (-fr)[/bold bright_cyan]" if lang_fr else ""
+
+    console.print(
+        Panel(
+            f"[bold white]🔥 TOP {len(top_list)} — LES {len(top_list)} INFOS LES PLUS PERTINENTES À SAVOIR[/bold white]{lang_badge}\n"
+            f"[dim]Sélectionnées automatiquement par score de criticité (CVE, exploitation active, avis CERT-FR, impact Tech)[/dim]",
+            border_style="bright_yellow",
+            box=box.DOUBLE_EDGE,
+        )
+    )
+
+    for art in top_list:
+        rank = art.get("top_rank", 1)
+        orig_id = art.get("display_id", rank)
+        reason = art.get("relevance_reason", "Prioritaire")
+        cat = art["category"]
+        color = "red" if cat == "Cyber" else "green"
+        cat_label = "🛡 CYBER" if cat == "Cyber" else "⚡ TECH"
+        url = art["url"]
+
+        title_disp, short_disp, detail_disp, is_tr = _get_article_texts(art, lang_fr)
+        summary_text = detail_disp if len(detail_disp) <= 320 else short_disp
+        vo_line = f"[dim italic]VO : {art['title']}[/dim italic]\n" if is_tr else ""
+
+        body = (
+            f"{vo_line}"
+            f"[bold yellow]Pertinence :[/bold yellow] [bold white]{reason}[/bold white]\n"
+            f"[bold cyan]L'essentiel :[/bold cyan] {summary_text}\n\n"
+            f"[dim]Source :[/dim] [cyan]{art['source']}[/cyan]  │  "
+            f"[dim]Date :[/dim] {art['published_at']}  │  "
+            f"[dim]Réf. :[/dim] #{orig_id:02d} ([italic]veille -d {orig_id}[/italic])\n"
+            f"[dim]Lien :[/dim] [link={url}][underline bright_cyan]{url}[/underline bright_cyan][/link]"
+        )
+        console.print(
+            Panel(
+                body,
+                title=(
+                    f"[bold bright_yellow]TOP #{rank}[/bold bright_yellow] "
+                    f"[bold {color}][{cat_label}][/bold {color}] "
+                    f"[bold white]{title_disp}[/bold white]"
+                ),
+                title_align="left",
+                border_style="yellow" if rank == 1 else color,
+                padding=(0, 2),
+            )
+        )
+
+    console.print(
+        Panel(
+            "[bold cyan]veille -t -fr[/bold cyan] : Top 5 en français  │  "
+            "[bold cyan]veille -d <Réf>[/bold cyan] : Analyse IA approfondie  │  "
+            "[bold cyan]veille[/bold cyan] : Vue complète",
             border_style="dim",
             box=box.ROUNDED,
         )
@@ -348,6 +420,7 @@ def render_manual() -> None:
 
 ## SYNOPSIS
 - `veille`
+- `veille -t [-fr]` | `veille --top [-fr]`
 - `veille -fr` | `veille --french`
 - `veille -s [-fr]` | `veille --sources [-fr]`
 - `veille -d [-fr]` | `veille --detail [-fr]`
@@ -361,31 +434,38 @@ def render_manual() -> None:
    - **Briefing Exécutif Global** généré par l'IA locale.
    - **Actualités classées par catégories** (`Cybersécurité` / `Tech`) avec **titres numérotés** (`[01]`, `[02]`...) et **points clés**.
 
-2. **`veille -fr`** *(ou `--fr` / `--french`, combinable avec `-s` et `-d`)*
+2. **`veille -t`** *(ou `--top`, combinable avec `-fr`)*
+   Affiche uniquement le **Top 5 des informations les plus pertinentes à savoir** (sélectionnées par score de criticité : CVE, exploitation active, avis CERT-FR, impact majeur, avec résumé et lien URL cliquable).
+
+3. **`veille -fr`** *(ou `--fr` / `--french`, combinable avec `-t`, `-s` et `-d`)*
    Affiche une **traduction française complète** de chaque article (titre traduit en français + rappel discret du titre original `VO` + résumé court ou détaillé intégralement traduit en français).
 
-3. **`veille -s`** *(ou `--sources`, combinable avec `-fr`)*
+4. **`veille -s`** *(ou `--sources`, combinable avec `-fr`)*
    Affiche le tableau complet des articles du jour avec leurs **numéros**, **catégories**, **sources**, **dates de publication** et **liens URL cliquables** directement dans le terminal.
 
-4. **`veille -d`** *(ou `--detail`, combinable avec `-fr`)*
+5. **`veille -d`** *(ou `--detail`, combinable avec `-fr`)*
    Affiche le **rapport détaillé** de toutes les actualités du jour (résumé technique complet de 2-3 phrases par article, source et lien).
 
-5. **`veille -d "mot-clé ou sujet"`** *(ou `--detail "mot-clé"`, combinable avec `-fr`)*
+6. **`veille -d "mot-clé ou sujet"`** *(ou `--detail "mot-clé"`, combinable avec `-fr`)*
    Recherche dans les articles du jour (en anglais et en français, par mot-clé, CVE, technologie ou numéro d'article ex: `veille -d 1`) et interroge le moteur IA local **Ollama** pour fournir une **analyse approfondie** :
    - Contexte & synthèse de l'incident ou de la technologie.
    - Impacts techniques (CVE, systèmes touchés, vecteurs d'attaque).
    - Recommandations de sécurité et mesures de remédiation.
 
-6. **`veille -u`** *(ou `--update`)*
+7. **`veille -u`** *(ou `--update`)*
    Force une **mise à jour manuelle immédiate** : récupère tous les flux RSS en parallèle, déduplique, génère les résumés et les traductions françaises en cache SQLite et met à jour le Briefing Global du jour.
 
-7. **`veille man`**
+8. **`veille man`**
    Affiche ce manuel d'utilisation complet.
 
 ## EXEMPLES D'UTILISATION
 ```bash
 # Consulter le briefing du jour instantanément
 veille
+
+# Afficher uniquement les 5 infos les plus pertinentes à savoir (en VO ou en français)
+veille -t
+veille -t -fr
 
 # Consulter le briefing avec traduction française intégrale de chaque article
 veille -fr
@@ -437,6 +517,12 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         default=None,
         help="Sous-commande optionnelle : 'man' pour afficher le manuel complet.",
+    )
+    parser.add_argument(
+        "-t",
+        "--top",
+        action="store_true",
+        help="Affiche uniquement les 5 actualités les plus pertinentes à savoir.",
     )
     parser.add_argument(
         "-fr",
@@ -517,9 +603,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.update:
         run_update_worker(quiet=args.quiet)
-        if not args.quiet and not args.sources and args.detail is None:
+        if not args.quiet and not args.sources and args.detail is None and not args.top:
             console.print()
             render_synthetic_briefing(config, db_path, lang_fr=lang_fr)
+        elif not args.quiet and args.top:
+            console.print()
+            render_top_articles(config, db_path, lang_fr=lang_fr)
+        return 0
+
+    if args.top:
+        render_top_articles(config, db_path, lang_fr=lang_fr)
         return 0
 
     if args.sources:

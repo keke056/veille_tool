@@ -280,6 +280,141 @@ def search_articles(
     return [item[1] for item in scored[:6]]
 
 
+def score_article_relevance(art: dict[str, Any]) -> tuple[int, str]:
+    """
+    Calcule un score de pertinence/criticité pour un article et retourne
+    (score, raison_principale) afin d'extraire le Top 5 des actualités à connaître.
+    """
+    text_all = (
+        f"{art.get('title', '')} {art.get('title_fr', '')} "
+        f"{art.get('summary_short', '')} {art.get('summary_detail', '')} "
+        f"{art.get('raw_content', '')}"
+    ).lower()
+    source = art.get("source", "")
+    category = art.get("category", "Cyber")
+
+    score = 10 if category == "Cyber" else 6
+    reasons: list[str] = []
+
+    # 1. Présence de CVE ou bulletin CERT-FR
+    cves = re.findall(r"cve-\d{4}-\d{4,7}", text_all)
+    if cves:
+        score += 28
+        reasons.append(f"Vulnérabilité {cves[0].upper()}")
+
+    if "cert-fr" in source.lower() or "certfr-" in text_all:
+        score += 20
+        reasons.append("Avis officiel CERT-FR")
+
+    # 2. Mots-clés de criticité Cyber (0-day, RCE, exploitation active, brèche)
+    critical_terms = {
+        "active exploitation": ("Exploitation active", 18),
+        "actively exploited": ("Exploitation active", 18),
+        "activement exploit": ("Exploitation active", 18),
+        "zero-day": ("Zero-Day", 18),
+        "0-day": ("Zero-Day", 18),
+        "unauthenticated": ("Sans authentification", 14),
+        "sans authentification": ("Sans authentification", 14),
+        "rce": ("Exécution de code (RCE)", 15),
+        "remote code execution": ("Exécution de code (RCE)", 15),
+        "exécution de code": ("Exécution de code (RCE)", 15),
+        "critical": ("Sévérité critique", 12),
+        "critique": ("Sévérité critique", 12),
+        "data breach": ("Fuite / Violation de données", 12),
+        "fuite": ("Fuite de données", 11),
+        "vol de données": ("Vol de données", 12),
+        "ransomware": ("Ransomware", 13),
+        "compromised": ("Compromission", 12),
+        "compromis": ("Compromission", 12),
+        "bypass": ("Contournement de sécurité", 11),
+    }
+    matched_crit = 0
+    for term, (label, pts) in critical_terms.items():
+        if term in text_all:
+            score += pts
+            if label not in reasons:
+                reasons.append(label)
+            matched_crit += 1
+            if matched_crit >= 3:
+                break
+
+    # 3. Technologies, infrastructures et acteurs majeurs
+    tech_terms = (
+        "linux", "windows", "nginx", "apache", "f5", "big-ip", "microsoft",
+        "kerberos", "edge", "nvidia", "amd", "pypi", "meta", "openai",
+        "bitlocker", "tpm", "nextcloud", "cloud",
+    )
+    for t_term in tech_terms:
+        if f" {t_term}" in f" {text_all}":
+            score += 7
+            break
+
+    # 4. Popularité Hacker News éventuelle
+    m_pts = re.search(r"points:\s*(\d+)", text_all)
+    if m_pts:
+        hn_pts = int(m_pts.group(1))
+        score += min(18, hn_pts // 25)
+        if hn_pts >= 150:
+            reasons.append(f"Tendance Tech ({hn_pts} pts HN)")
+
+    if not reasons:
+        reasons.append("Alerte Cyber prioritaire" if category == "Cyber" else "Actualité Tech majeure")
+
+    return score, " • ".join(reasons[:2])
+
+
+def get_top_articles(
+    articles: list[dict[str, Any]],
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """
+    Sélectionne les `limit` (5 par défaut) actualités les plus pertinentes du jour
+    en combinant score de criticité, diversité des sources et équilibre Cyber/Tech.
+    """
+    if not articles:
+        return []
+
+    scored_items: list[tuple[int, str, dict[str, Any]]] = []
+    for art in articles:
+        base_score, reason = score_article_relevance(art)
+        scored_items.append((base_score, reason, art))
+
+    scored_items.sort(key=lambda x: (x[0], x[2].get("published_at", "")), reverse=True)
+
+    selected: list[dict[str, Any]] = []
+    source_counts: dict[str, int] = {}
+
+    # 1er passage : diversité des sources (max 2 par source)
+    for score, reason, art in scored_items:
+        src = art.get("source", "")
+        if source_counts.get(src, 0) >= 2:
+            continue
+        art_copy = dict(art)
+        art_copy["relevance_score"] = score
+        art_copy["relevance_reason"] = reason
+        selected.append(art_copy)
+        source_counts[src] = source_counts.get(src, 0) + 1
+        if len(selected) >= limit:
+            break
+
+    # Complément éventuel si moins de `limit` articles
+    if len(selected) < limit:
+        selected_ids = {a.get("display_id") for a in selected}
+        for score, reason, art in scored_items:
+            if art.get("display_id") not in selected_ids:
+                art_copy = dict(art)
+                art_copy["relevance_score"] = score
+                art_copy["relevance_reason"] = reason
+                selected.append(art_copy)
+                if len(selected) >= limit:
+                    break
+
+    for rank, art in enumerate(selected, start=1):
+        art["top_rank"] = rank
+
+    return selected
+
+
 def save_briefing(
     db_path: Path,
     global_summary: str,

@@ -20,6 +20,7 @@ Outil CLI autonome 100% local et **multi-plateforme (Linux, macOS, Windows)** en
 | Commande | Description |
 | :--- | :--- |
 | `veille` | Affiche instantanément le **Résumé Synthétique du Jour** (Briefing Global + articles classés par catégories `Cyber` / `Tech` avec titres numérotés et points clés). |
+| `veille -t [-fr]` / `--top` | Affiche uniquement le **Top 5 des informations les plus pertinentes à savoir** (classées par criticité : CVE, RCE, avis CERT-FR, impact majeur, en VO ou traduit avec `-fr`). |
 | `veille -fr` | Affiche le résumé synthétique du jour avec la **traduction française intégrale** de chaque article (titre traduit, rappel du titre original `VO` et résumé traduit). |
 | `veille -s [-fr]` / `--sources` | Affiche le tableau des articles du jour avec titres (traduits si `-fr`), dates, sources et **liens URL cliquables**. |
 | `veille -d [-fr]` / `--detail` | Affiche le **résumé technique détaillé** de toutes les actualités du jour (en français intégral avec `-fr`). |
